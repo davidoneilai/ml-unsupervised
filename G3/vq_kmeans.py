@@ -86,12 +86,13 @@ def kmax_for_patches(N_pixels, patch_h=2, patch_w=2, min_compression_ratio=0.5):
             break
     return K_max
 
-def sample_Ks(Kmax, num_points=10):
+def sample_Ks(Kmax, num_points=10, use_all_ks=False):
     """
     Amostra 'num_points' valores inteiros de K uniformemente entre 1 e Kmax (inclui extremos).
     Mantém coisa viável em tempo de execução e mostra a tendência até o limite da taxa.
+    Se use_all_ks=True, retorna todos os valores de 1 até Kmax.
     """
-    if Kmax <= num_points:
+    if use_all_ks or Kmax <= num_points:
         return list(range(1, Kmax + 1))
     grid = np.unique(np.linspace(1, Kmax, num=num_points, dtype=int))
     return grid.tolist()
@@ -205,28 +206,58 @@ def main(args):
     Kmax_px = kmax_for_pixels(N, min_compression_ratio=0.5)
     Kmax_pt = kmax_for_patches(N, patch_h=2, patch_w=2, min_compression_ratio=0.5)
 
-    # Amostra Ks (de 1 até Kmax)
-    Ks_px = sample_Ks(Kmax_px, num_points=args.k_points)
-    Ks_pt = sample_Ks(Kmax_pt, num_points=args.k_points)
+    print(f"N_pixels = {N}")
+    print(f"K_max (Pixel-VQ, ≥50% compressão) = {Kmax_px}")
+    print(f"K_max (VQ 2×2, ≥50% compressão)   = {Kmax_pt}")
 
-    # Curvas de loss
+    # Usa TODOS os Ks até Kmax para o gráfico principal (como pedido pelo professor)
+    # Mas se Kmax for muito grande (>50), usa amostragem para não travar (exceto se --all-ks for usado)
+    use_all_px = args.all_ks or Kmax_px <= 50
+    use_all_pt = args.all_ks or Kmax_pt <= 50
+    
+    Ks_px = sample_Ks(Kmax_px, num_points=args.k_points, use_all_ks=use_all_px)
+    Ks_pt = sample_Ks(Kmax_pt, num_points=args.k_points, use_all_ks=use_all_pt)
+
+    print(f"Testando {len(Ks_px)} valores de K para Pixel-VQ: {Ks_px[:5]}{'...' if len(Ks_px) > 5 else ''}")
+    print(f"Testando {len(Ks_pt)} valores de K para VQ 2×2: {Ks_pt[:5]}{'...' if len(Ks_pt) > 5 else ''}")
+
+    # Curvas de loss (K variando de 1 até Kmax para garantir 50% compressão)
     loss_px, loss_pt = [], []
-    for K in Ks_px:
+    
+    print("Processando Pixel-VQ...")
+    for i, K in enumerate(Ks_px):
+        if i % max(1, len(Ks_px)//5) == 0:  
+            print(f"  K={K} ({i+1}/{len(Ks_px)})")
         recon = vq_pixels(img, K)
         loss_px.append(mse(img, recon))
-    for K in Ks_pt:
+    
+    print("Processando VQ 2×2...")    
+    for i, K in enumerate(Ks_pt):
+        if i % max(1, len(Ks_pt)//5) == 0:
+            print(f"  K={K} ({i+1}/{len(Ks_pt)})")
         recon = vq_patches2x2(img, K)
         loss_pt.append(mse(img, recon))
 
-    # aqui vamo plotar Loss x K
-    plt.figure(figsize=(8, 5))
-    plt.plot(Ks_px, loss_px, marker='o', label=f'Pixel-VQ (K até {Kmax_px})')
-    plt.plot(Ks_pt, loss_pt, marker='s', label=f'VQ em janelas 2×2 (K até {Kmax_pt})')
+    # aqui vamo plotar Loss x K (GRÁFICO PRINCIPAL como pedido pelo luqueta)
+    plt.figure(figsize=(10, 6))
+    plt.plot(Ks_px, loss_px, marker='o', linewidth=2, markersize=4, 
+             label=f'Pixel-VQ (K até {Kmax_px})', color='blue')
+    plt.plot(Ks_pt, loss_pt, marker='s', linewidth=2, markersize=4,
+             label=f'VQ em janelas 2×2 (K até {Kmax_pt})', color='orange')
+    
     plt.xlabel('Número de clusters K')
     plt.ylabel('MSE de reconstrução')
-    plt.title('Vector Quantization com K-means: Pixel vs. Janelas 2×2 (256×256 RGB)')
+    plt.title('Vector Quantization com K-means: Pixel vs. Janelas 2×2 (256×256 RGB)\n' + 
+              'Loss de reconstrução com K variando de 1 até K_max (≥50% compressão)')
     plt.legend()
+    plt.grid(True, alpha=0.3)
     plt.tight_layout()
+    
+    # vamo colocar as informações sobre compressão no gráfico
+    plt.text(0.02, 0.98, f'Taxa de compressão ≥ 50%\nPixel-VQ: K_max = {Kmax_px}\nVQ 2×2: K_max = {Kmax_pt}', 
+             transform=plt.gca().transAxes, verticalalignment='top',
+             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+    
     plt.show()
 
     # Escolhe Ks representativos para visualização (¼ do Kmax)
@@ -249,19 +280,31 @@ def main(args):
     plt.show()
 
     # Métricas para mostrar na tela 
-    print(f"N_pixels = {N}")
-    print(f"K_max (Pixel-VQ, ≥50% compressão) = {Kmax_px}")
-    print(f"K_max (VQ 2×2, ≥50% compressão)   = {Kmax_pt}")
-    print(f"Ks (Pixel-VQ) = {Ks_px}")
-    print(f"Ks (VQ 2×2)   = {Ks_pt}")
-    print(f"MSE Pixel-VQ @K={Ks_px[-1]} = {loss_px[-1]:.6f}")
-    print(f"MSE VQ 2×2   @K={Ks_pt[-1]} = {loss_pt[-1]:.6f}")
+    print("\n" + "="*60)
+    print("RESULTADOS FINAIS:")
+    print("="*60)
+    print(f"Ks testados (Pixel-VQ) = {len(Ks_px)} valores de 1 até {Kmax_px}")
+    print(f"Ks testados (VQ 2×2)   = {len(Ks_pt)} valores de 1 até {Kmax_pt}")
+    print(f"MSE final Pixel-VQ @K={Ks_px[-1]} = {loss_px[-1]:.6f}")
+    print(f"MSE final VQ 2×2   @K={Ks_pt[-1]} = {loss_pt[-1]:.6f}")
     print(f"PSNR Pixel-VQ @K={K_show_px} = {psnr(img, recon_px):.2f} dB")
     print(f"PSNR VQ 2×2   @K={K_show_pt} = {psnr(img, recon_pt):.2f} dB")
+    
+    # Análise de qual estratégia é melhor
+    if loss_px[-1] < loss_pt[-1]:
+        melhor = "Pixel-VQ"
+        diferenca = ((loss_pt[-1] - loss_px[-1]) / loss_pt[-1]) * 100
+    else:
+        melhor = "VQ 2×2"
+        diferenca = ((loss_px[-1] - loss_pt[-1]) / loss_px[-1]) * 100
+    
+    print(f"\nCONCLUSÃO: {melhor} teve melhor performance com {diferenca:.1f}% menos erro")
+    print("="*60)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Vector Quantization com K-means (pixel vs. 2×2) para 256×256")
     parser.add_argument("--image", type=str, required=True, help="Caminho da imagem de entrada")
-    parser.add_argument("--k_points", type=int, default=10, help="Quantidade de pontos de K amostrados de 1 até Kmax")
+    parser.add_argument("--k_points", type=int, default=10, help="Quantidade de pontos de K amostrados (se não usar --all-ks)")
+    parser.add_argument("--all-ks", action="store_true", help="Testa TODOS os valores de K de 1 até Kmax (pode ser lento)")
     args = parser.parse_args()
     main(args)
